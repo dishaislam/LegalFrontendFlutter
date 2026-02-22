@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
 import 'history_screen.dart';
@@ -39,19 +40,33 @@ class _MainNavigationState extends State<MainNavigation> {
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: AppColors.bottomNavBackground,
-          border: Border(top: BorderSide(color: AppColors.divider, width: 0.5)),
+          border: Border(
+              top: BorderSide(
+                  color: AppColors.divider.withOpacity(0.1), width: 0.5)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
         ),
         child: SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
+            padding: const EdgeInsets.symmetric(vertical: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildNavItem(0, Icons.home_outlined, Icons.home, 'HOME'),
-                _buildNavItem(1, Icons.history_outlined, Icons.history, 'HISTORY', hasDot: true),
-                _buildNavItem(2, Icons.chat_outlined, Icons.chat, 'CONSULT'),
-                _buildNavItem(3, Icons.settings_outlined, Icons.settings, 'SETTINGS'),
+                _buildNavItem(
+                    0, Icons.home_outlined, Icons.home_rounded, 'HOME'),
+                _buildNavItem(
+                    1, Icons.history_outlined, Icons.history_rounded, 'HISTORY',
+                    hasDot: true),
+                _buildNavItem(2, Icons.chat_bubble_outline_rounded,
+                    Icons.chat_bubble_rounded, 'CONSULT'),
+                _buildNavItem(3, Icons.settings_outlined,
+                    Icons.settings_rounded, 'PROFILE'),
               ],
             ),
           ),
@@ -60,12 +75,15 @@ class _MainNavigationState extends State<MainNavigation> {
     );
   }
 
-  Widget _buildNavItem(int index, IconData outlinedIcon, IconData filledIcon, String label, {bool hasDot = false}) {
+  Widget _buildNavItem(
+      int index, IconData outlinedIcon, IconData filledIcon, String label,
+      {bool hasDot = false}) {
     final isSelected = _currentIndex == index;
     return GestureDetector(
       onTap: () => setState(() => _currentIndex = index),
       behavior: HitTestBehavior.opaque,
-      child: SizedBox(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         width: 70,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -75,16 +93,18 @@ class _MainNavigationState extends State<MainNavigation> {
               children: [
                 Icon(
                   isSelected ? filledIcon : outlinedIcon,
-                  color: isSelected ? AppColors.primaryLight : AppColors.textTertiary,
-                  size: 26,
+                  color: isSelected
+                      ? AppColors.primaryLight
+                      : AppColors.textTertiary,
+                  size: 24,
                 ),
                 if (hasDot && !isSelected)
                   Positioned(
-                    right: -2,
-                    top: -2,
+                    right: -1,
+                    top: -1,
                     child: Container(
-                      width: 8,
-                      height: 8,
+                      width: 7,
+                      height: 7,
                       decoration: const BoxDecoration(
                         color: AppColors.primary,
                         shape: BoxShape.circle,
@@ -93,14 +113,16 @@ class _MainNavigationState extends State<MainNavigation> {
                   ),
               ],
             ),
-            const SizedBox(height: 3),
+            const SizedBox(height: 5),
             Text(
               label,
-              style: TextStyle(
-                color: isSelected ? AppColors.primaryLight : AppColors.textTertiary,
-                fontSize: 10,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                letterSpacing: 0.3,
+              style: GoogleFonts.outfit(
+                color: isSelected
+                    ? AppColors.primaryLight
+                    : AppColors.textTertiary,
+                fontSize: 9,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                letterSpacing: 0.6,
               ),
             ),
           ],

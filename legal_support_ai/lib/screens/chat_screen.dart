@@ -1,18 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../services/api_service.dart';
 
 class ChatMessage {
   final String text;
   final bool isUser;
   final List<String>? references;
   final String? status;
+  final DateTime timestamp;
 
-  const ChatMessage({
+  ChatMessage({
     required this.text,
     required this.isUser,
     this.references,
     this.status,
-  });
+    DateTime? timestamp,
+  }) : timestamp = timestamp ?? DateTime.now();
 }
 
 class ChatScreen extends StatefulWidget {
@@ -25,33 +31,102 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
-  
-  final List<ChatMessage> _messages = [
-    const ChatMessage(
-      text: "What are my rights if my landlord increases rent by 20% without notice?",
-      isUser: true,
-      status: 'Delivered',
-    ),
-    const ChatMessage(
-      text: "Under the __Housing Act 1988__ [1], your landlord is generally required to provide a minimum notice period of at least one month (for monthly tenancies) or six months (for yearly tenancies) before a rent increase takes effect.\n\nA 20% increase without prior notice is likely a breach of statutory procedure. You have the right to challenge this through a First-tier Tribunal [2] if the increase is above market rate or improperly served.",
-      isUser: false,
-      references: ['Housing Act 1988', 'First-tier Tribunal'],
-    ),
-  ];
+  final ApiService _apiService = ApiService();
 
-  void _sendMessage() {
+  String? _chatId;
+  bool _isLoading = false;
+  bool _isAITyping = false;
+
+  final List<ChatMessage> _messages = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeChat();
+  }
+
+  Future<void> _initializeChat() async {
+    setState(() => _isLoading = true);
+    final chatId = await _apiService.createChat();
+    if (chatId != null) {
+      if (mounted) {
+        setState(() {
+          _chatId = chatId;
+          _isLoading = false;
+          _messages.add(ChatMessage(
+            text:
+                "Hello! I am your **Bangladesh Legal Assistant**. How can I assist you with legal matters today?",
+            isUser: false,
+          ));
+        });
+      }
+    } else {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.redAccent,
+            content: Text(
+              'Failed to initialize secure session. Please check your connection.',
+              style: GoogleFonts.outfit(),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _chatId == null || _isAITyping) return;
+
+    final userMsg = ChatMessage(text: text, isUser: true, status: 'Sending...');
     setState(() {
-      _messages.add(ChatMessage(text: text, isUser: true, status: 'Delivered'));
+      _messages.add(userMsg);
+      _isAITyping = true;
     });
+
     _messageController.clear();
+    _scrollToBottom();
+
+    final answer = await _apiService.sendMessage(_chatId!, text);
+
+    if (mounted) {
+      setState(() {
+        _isAITyping = false;
+        // Update last message status
+        final msgIndex = _messages.indexOf(userMsg);
+        if (msgIndex != -1) {
+          _messages[msgIndex] = ChatMessage(
+            text: text,
+            isUser: true,
+            status: 'Delivered',
+            timestamp: userMsg.timestamp,
+          );
+        }
+
+        if (answer != null) {
+          _messages.add(ChatMessage(text: answer, isUser: false));
+        } else {
+          _messages.add(ChatMessage(
+              text:
+                  "I apologies, but I encountered an error processing your request. Please try again.",
+              isUser: false));
+        }
+      });
+      _scrollToBottom();
+    }
+  }
+
+  void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
@@ -59,344 +134,493 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.background,
-        leadingWidth: 52,
-        leading: Padding(
-          padding: const EdgeInsets.only(left: 12),
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.gavel, color: Colors.white, size: 22),
+      appBar: _buildAppBar(),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              AppColors.background,
+              AppColors.background.withOpacity(0.8),
+            ],
           ),
         ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
           children: [
-            const Text(
-              'LegalSupportAI',
-              style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-              ),
+            _buildSecurityBadge(),
+            Expanded(
+              child: _chatId == null && _isLoading
+                  ? _buildInitialLoading()
+                  : _buildMessageList(),
             ),
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: AppColors.greenOnline,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 5),
-                const Text(
-                  'SECURE & CONFIDENTIAL',
-                  style: TextStyle(
-                    color: AppColors.greenOnline,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
+            _buildInputArea(),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: AppColors.textPrimary),
-            onPressed: () {},
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Encrypted badge
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(Icons.shield_outlined, color: AppColors.textSecondary, size: 14),
-                SizedBox(width: 6),
-                Text(
-                  'END-TO-END ENCRYPTED',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Messages
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final message = _messages[index];
-                return message.isUser
-                    ? _buildUserMessage(message)
-                    : _buildAIMessage(message);
-              },
-            ),
-          ),
-          // Quick action chips
-          SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: [
-                _buildChip('Summarize Contract', Icons.article_outlined),
-                const SizedBox(width: 10),
-                _buildChip('Explain Tenant Rights', Icons.home_outlined),
-                const SizedBox(width: 10),
-                _buildChip('Review NDA', Icons.description_outlined),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          // Input area
-          Container(
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.inputBackground,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: AppColors.divider),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.attach_file, color: AppColors.textSecondary, size: 22),
-                      onPressed: () {},
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.mic_outlined, color: AppColors.textSecondary, size: 22),
-                      onPressed: () {},
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.camera_alt_outlined, color: AppColors.textSecondary, size: 22),
-                      onPressed: () {},
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _messageController,
-                        style: const TextStyle(color: AppColors.textPrimary, fontSize: 15),
-                        decoration: const InputDecoration(
-                          hintText: 'Type legal question...',
-                          hintStyle: TextStyle(color: AppColors.textTertiary),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(vertical: 8),
-                        ),
-                        maxLines: 3,
-                        minLines: 1,
-                        onSubmitted: (_) => _sendMessage(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: _sendMessage,
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(Icons.arrow_forward, color: Colors.white, size: 20),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          // Footer
-          const Padding(
-            padding: EdgeInsets.only(bottom: 8),
-            child: Text(
-              'VERIFIED LEGAL DATA · END-TO-END ENCRYPTED',
-              style: TextStyle(
-                color: AppColors.textTertiary,
-                fontSize: 10,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
 
-  Widget _buildUserMessage(ChatMessage message) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Container(
-            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      centerTitle: false,
+      leadingWidth: 54,
+      leading: Padding(
+        padding: const EdgeInsets.only(left: 14),
+        child: Center(
+          child: Container(
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
-              color: AppColors.userBubble,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(18),
-                topRight: Radius.circular(18),
-                bottomLeft: Radius.circular(18),
-                bottomRight: Radius.circular(4),
+              gradient: const LinearGradient(
+                colors: [AppColors.primary, AppColors.primaryLight],
               ),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
             ),
-            child: Text(
-              message.text,
-              style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
-            ),
+            child:
+                const Icon(Icons.gavel_rounded, color: Colors.white, size: 20),
           ),
-          if (message.status != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                message.status!,
-                style: const TextStyle(color: AppColors.textTertiary, fontSize: 12),
-              ),
-            ),
-        ],
+        ),
       ),
-    );
-  }
-
-  Widget _buildAIMessage(ChatMessage message) {
-    // Parse message text for references
-    final parts = _parseMessageText(message.text);
-    
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Row(
+      title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(10),
+          Text(
+            'LegalSupportAI',
+            style: GoogleFonts.outfit(
+              color: AppColors.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
             ),
-            child: const Icon(Icons.balance, color: AppColors.textSecondary, size: 20),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    'LEGAL ADVISOR',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
+          Row(
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(
+                  color: AppColors.greenOnline,
+                  shape: BoxShape.circle,
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: AppColors.cardBackground,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(4),
-                      topRight: Radius.circular(18),
-                      bottomLeft: Radius.circular(18),
-                      bottomRight: Radius.circular(18),
-                    ),
-                  ),
-                  child: RichText(text: TextSpan(children: parts, style: const TextStyle(fontSize: 15, height: 1.5, color: AppColors.textPrimary))),
+              )
+                  .animate(onPlay: (controller) => controller.repeat())
+                  .scale(
+                      duration: 1000.ms,
+                      begin: const Offset(0.8, 0.8),
+                      end: const Offset(1.2, 1.2))
+                  .then()
+                  .scale(
+                      duration: 1000.ms,
+                      begin: const Offset(1.2, 1.2),
+                      end: const Offset(0.8, 0.8)),
+              const SizedBox(width: 6),
+              Text(
+                'ENCRYPTED SESSION',
+                style: GoogleFonts.outfit(
+                  color: AppColors.greenOnline,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.8,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.history_rounded,
+              color: AppColors.textSecondary, size: 22),
+          onPressed: () {},
+        ),
+        const SizedBox(width: 8),
+      ],
     );
   }
 
-  List<InlineSpan> _parseMessageText(String text) {
-    final List<InlineSpan> spans = [];
-    final parts = text.split('\n\n');
-    for (int p = 0; p < parts.length; p++) {
-      if (p > 0) spans.add(const TextSpan(text: '\n\n'));
-      final part = parts[p];
-      // Check for __text__ pattern (bold/link style)
-      final regex = RegExp(r'__(.*?)__');
-      int lastEnd = 0;
-      for (final match in regex.allMatches(part)) {
-        if (match.start > lastEnd) {
-          spans.add(TextSpan(text: part.substring(lastEnd, match.start)));
-        }
-        spans.add(TextSpan(
-          text: match.group(1),
-          style: TextStyle(color: AppColors.primaryLight, fontStyle: FontStyle.italic),
-        ));
-        lastEnd = match.end;
-      }
-      if (lastEnd < part.length) {
-        spans.add(TextSpan(text: part.substring(lastEnd)));
-      }
-    }
-    return spans;
-  }
-
-  Widget _buildChip(String label, IconData icon) {
+  Widget _buildSecurityBadge() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.only(top: 8, bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
+        color: AppColors.surfaceVariant.withOpacity(0.5),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: AppColors.divider.withOpacity(0.1)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: AppColors.textSecondary, size: 14),
+          const Icon(Icons.lock_outline_rounded,
+              color: AppColors.textTertiary, size: 12),
           const SizedBox(width: 6),
           Text(
-            label,
-            style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+            'AES-256 BANK-GRADE ENCRYPTION',
+            style: GoogleFonts.outfit(
+              color: AppColors.textTertiary,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.0,
+            ),
           ),
         ],
+      ),
+    ).animate().fadeIn(duration: 600.ms).slideY(begin: -0.2, end: 0);
+  }
+
+  Widget _buildInitialLoading() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+            strokeWidth: 3,
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Establishing Secure Connection...',
+            style: GoogleFonts.outfit(
+              color: AppColors.textSecondary,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageList() {
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: _messages.length + (_isAITyping ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (index == _messages.length) {
+          return _buildTypingIndicator();
+        }
+        final message = _messages[index];
+        return message.isUser
+            ? _buildUserBubble(message)
+            : _buildAIBubble(message);
+      },
+    );
+  }
+
+  Widget _buildUserBubble(ChatMessage message) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 20, left: 40),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [AppColors.primary, Color(0xFF4A68E1)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(22),
+                  topRight: Radius.circular(22),
+                  bottomLeft: Radius.circular(22),
+                  bottomRight: Radius.circular(4),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withOpacity(0.2),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Text(
+                message.text,
+                style: GoogleFonts.outfit(
+                  color: Colors.white,
+                  fontSize: 15,
+                  height: 1.4,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              message.status ?? '',
+              style: GoogleFonts.outfit(
+                color: AppColors.textTertiary,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ).animate().fadeIn(duration: 300.ms).slideX(begin: 0.1, end: 0),
+    );
+  }
+
+  Widget _buildAIBubble(ChatMessage message) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24, right: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.divider.withOpacity(0.1)),
+            ),
+            child: const Icon(Icons.auto_awesome_rounded,
+                color: AppColors.primaryLight, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.cardBackground,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(4),
+                      topRight: Radius.circular(22),
+                      bottomLeft: Radius.circular(22),
+                      bottomRight: Radius.circular(22),
+                    ),
+                    border:
+                        Border.all(color: AppColors.divider.withOpacity(0.1)),
+                  ),
+                  child: MarkdownBody(
+                    data: message.text,
+                    styleSheet: MarkdownStyleSheet(
+                      p: GoogleFonts.outfit(
+                        color: AppColors.textPrimary,
+                        fontSize: 15,
+                        height: 1.6,
+                      ),
+                      strong: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+                      listBullet:
+                          GoogleFonts.outfit(color: AppColors.primaryLight),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildActionRow(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ).animate().fadeIn(duration: 400.ms).slideX(begin: -0.1, end: 0);
+  }
+
+  Widget _buildActionRow() {
+    return Row(
+      children: [
+        _buildSmallAction(Icons.copy_rounded, 'Copy'),
+        const SizedBox(width: 16),
+        _buildSmallAction(Icons.thumb_up_alt_outlined, 'Helpful'),
+        const SizedBox(width: 16),
+        _buildSmallAction(Icons.refresh_rounded, 'Regenerate'),
+      ],
+    );
+  }
+
+  Widget _buildSmallAction(IconData icon, String label) {
+    return InkWell(
+      onTap: () {},
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: AppColors.textTertiary),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style:
+                GoogleFonts.outfit(color: AppColors.textTertiary, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTypingIndicator() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.auto_awesome_rounded,
+                color: AppColors.primaryLight, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.cardBackground,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: List.generate(
+                  3,
+                  (i) => Container(
+                        width: 6,
+                        height: 6,
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        decoration: const BoxDecoration(
+                            color: AppColors.textTertiary,
+                            shape: BoxShape.circle),
+                      )
+                          .animate(onPlay: (c) => c.repeat())
+                          .scale(
+                              duration: 600.ms,
+                              delay: (i * 200).ms,
+                              begin: const Offset(1, 1),
+                              end: const Offset(1.5, 1.5))
+                          .then()
+                          .scale(duration: 600.ms)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputArea() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 20,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildQuickChip('Draft Contract'),
+                _buildQuickChip('Tenant Rights'),
+                _buildQuickChip('Business Law'),
+                _buildQuickChip('Legal Fees'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.inputBackground,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AppColors.divider.withOpacity(0.1)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.add_circle_outline_rounded,
+                      color: AppColors.textSecondary),
+                  onPressed: () {},
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: TextField(
+                      controller: _messageController,
+                      style: GoogleFonts.outfit(
+                          color: AppColors.textPrimary, fontSize: 15),
+                      maxLines: 5,
+                      minLines: 1,
+                      decoration: InputDecoration(
+                        hintText: 'Ask a legal question...',
+                        hintStyle:
+                            GoogleFonts.outfit(color: AppColors.textTertiary),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 12),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6, right: 6),
+                  child: GestureDetector(
+                    onTap: _sendMessage,
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: _isAITyping
+                            ? AppColors.textTertiary
+                            : AppColors.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.arrow_upward_rounded,
+                          color: Colors.white, size: 22),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'LegalSupportAI can make mistakes. Check important info.',
+            style:
+                GoogleFonts.outfit(color: AppColors.textTertiary, fontSize: 10),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickChip(String text) {
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      child: ActionChip(
+        label: Text(text,
+            style: GoogleFonts.outfit(
+                fontSize: 12, color: AppColors.textSecondary)),
+        backgroundColor: AppColors.surfaceVariant.withOpacity(0.4),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: AppColors.divider.withOpacity(0.1))),
+        onPressed: () {
+          _messageController.text = text;
+        },
       ),
     );
   }
